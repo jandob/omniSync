@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 import signal
 import math
 from gi.repository import Gtk as gtk
