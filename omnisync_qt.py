@@ -12,7 +12,7 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
         self.setIcon(QtGui.QIcon(self._pixmap_original))
 
     def _initialize_animation(self):
-        animation_length_seconds = 0.5
+        animation_length_seconds = 2
         frames_per_second = 24.0
         self._frame_length_milliseconds = int(1000 / frames_per_second)
         self._frames = int(animation_length_seconds * frames_per_second)
