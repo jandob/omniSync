@@ -47,9 +47,10 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
             minimum = 0.4
             shrink_factor = (1.0 - math.sin(progress * math.pi) ** 2)
             shrink_factor = minimum + ((1 - minimum) * shrink_factor)
-            shrink_factor = round(shrink_factor, 1)
             x = max(1, int(self._pixmap_original.width() * shrink_factor))
-            return QtGui.QIcon(self._pixmap_original.scaled(x, x))
+            return QtGui.QIcon(self._pixmap_original.scaled(
+                x, x, transformMode=QtCore.Qt.SmoothTransformation
+            ))
         self._start_animation(calculate_frame)
 
 
