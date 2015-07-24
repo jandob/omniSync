@@ -12,7 +12,7 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
         self.setIcon(QtGui.QIcon(self._pixmap_original))
 
     def _initialize_animation(self):
-        animation_length_seconds = 2
+        animation_length_seconds = 1
         frames_per_second = 24.0
         self._frame_length_milliseconds = int(1000 / frames_per_second)
         self._frames = int(animation_length_seconds * frames_per_second)
@@ -44,9 +44,10 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
         self._initialize_animation()
 
         def calculate_frame(progress):
-            minimum = 0.5
+            minimum = 0.4
             shrink_factor = (1.0 - math.sin(progress * math.pi) ** 2)
             shrink_factor = minimum + ((1 - minimum) * shrink_factor)
+            shrink_factor = round(shrink_factor, 1)
             x = max(1, int(self._pixmap_original.width() * shrink_factor))
             return QtGui.QIcon(self._pixmap_original.scaled(x, x))
         self._start_animation(calculate_frame)
