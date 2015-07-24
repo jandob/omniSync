@@ -44,10 +44,10 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
         self._initialize_animation()
 
         def calculate_frame(progress):
-            x = max(1, int(
-                self._pixmap_original.width() *
-                (1.0 - math.sin(progress * math.pi) ** 2)
-            ))
+            minimum = 0.5
+            shrink_factor = (1.0 - math.sin(progress * math.pi) ** 2)
+            shrink_factor = minimum + ((1 - minimum) * shrink_factor)
+            x = max(1, int(self._pixmap_original.width() * shrink_factor))
             return QtGui.QIcon(self._pixmap_original.scaled(x, x))
         self._start_animation(calculate_frame)
 
