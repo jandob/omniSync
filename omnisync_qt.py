@@ -80,7 +80,7 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
         def animator():
             self._initialize_animation(animation_length_seconds)
             if callable(animation_function):
-                self._animate(animation_function, **kwargs)
+                self._animate(animation_function)
             else:
                 self._animate(functools.partial(
                     getattr(AnimationFunctions, animation_function), **kwargs
