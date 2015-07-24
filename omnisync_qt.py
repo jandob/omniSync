@@ -53,6 +53,23 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
             ))
         self._start_animation(calculate_frame)
 
+    def rotate(self):
+        self._initialize_animation()
+
+        def calculate_frame(progress):
+            width = self._pixmap_original.width()
+            height = self._pixmap_original.height()
+
+            rotated = QtGui.QPixmap(self._pixmap_original.transformed(
+                QtGui.QTransform().rotateRadians(progress * 2 * math.pi)
+            ))
+
+            xoffset = (rotated.width() - width) / 2
+            yoffset = (rotated.height() - height) / 2
+
+            rotated = rotated.copy(xoffset, yoffset, width, height)
+            return QtGui.QIcon(rotated)
+        self._start_animation(calculate_frame)
 
 class App():
     def __init__(self):
@@ -63,7 +80,7 @@ class App():
 
         menu = QtGui.QMenu()
         for (entry, action) in [
-            ('start animation', tray_icon.shrink),
+            ('start animation', tray_icon.rotate),
             ('stop animation', tray_icon.stop_animation),
             ('quit', QtGui.qApp.quit),
         ]:
