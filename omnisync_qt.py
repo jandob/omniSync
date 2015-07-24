@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-import sys
 import signal
 import math
 from PyQt4 import QtGui
 from PyQt4 import QtCore
+
 
 class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
     def __init__(self, icon_file_name, parent=None):
@@ -77,5 +77,3 @@ class App():
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     App()
-
-    #sys.exit()
