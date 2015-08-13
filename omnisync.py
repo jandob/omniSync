@@ -1,102 +1,140 @@
 #!/usr/bin/env python3
+"""
+
+.. _Google Python Style Guide:
+   http://google.github.io/styleguide/pyguide.html
+   http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
+"""
 import signal
 import math
-from gi.repository import Gtk as gtk
-from gi.repository import GLib as glib
-from gi.repository.GdkPixbuf import Pixbuf
-from gi.repository.GdkPixbuf import InterpType
+import functools
+from PyQt4 import QtGui
+from PyQt4 import QtCore
 
 
-class AnimatedStatusIcon(gtk.StatusIcon):
-    def __init__(self, image_file):
-        gtk.StatusIcon.__init__(self)
-        self.icon = Pixbuf.new_from_file(image_file)
-        self.set_from_pixbuf(self.icon)
+class AnimationFunctions:
+    """
+    Predefined animation functions.
 
-    def _initialize_animation(self):
-        animation_length_seconds = 0.5
+    The functions are called with the following positional arguments:
+    Args:
+        progress(float): The progress of the animation (0.0-1.0).
+        pixmap_original(QPixmap): The original image.
+        **kwargs: Can be used to provide customizable animations.
+    Returns:
+        Qpixmap: A new pixmap that corresponds to the animation `progress`,
+            `pixmap_original` should not be altered.
+
+    """
+    @staticmethod
+    def shrink(pixmap_original, progress, minimum=0.4):
+        shrink_factor = (1.0 - math.sin(progress * math.pi) ** 2)
+        shrink_factor = minimum + ((1 - minimum) * shrink_factor)
+        x = max(1, int(pixmap_original.width() * shrink_factor))
+        return pixmap_original.scaled(
+            x, x, transformMode=QtCore.Qt.SmoothTransformation
+        )
+
+    @staticmethod
+    def rotate(pixmap_original, progress):
+        width = pixmap_original.width()
+        height = pixmap_original.height()
+
+        rotated = QtGui.QPixmap(pixmap_original.transformed(
+            QtGui.QTransform().rotateRadians(progress * 2 * math.pi)
+        ))
+
+        xoffset = (rotated.width() - width) / 2
+        yoffset = (rotated.height() - height) / 2
+
+        return rotated.copy(xoffset, yoffset, width, height)
+
+
+class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
+    def __init__(self, icon_file_name, parent=None):
+        super().__init__(parent)
+        self._original_pixmap = QtGui.QPixmap(icon_file_name)
+        self.setIcon(QtGui.QIcon(self._original_pixmap))
+
+    def _initialize_animation(self, animation_length_seconds):
         frames_per_second = 24.0
         self._frame_length_milliseconds = int(1000 / frames_per_second)
         self._frames = int(animation_length_seconds * frames_per_second)
 
-    def _start_animation(self, calculate_frame):
+    def _animate(self, animation_function):
+        self._timer = QtCore.QTimer()
         self._repeat = True
         self._frame = 0
 
         def advance_frame():
             # animation progress from 0-1
             progress = self._frame / float(self._frames)
-            self.set_from_pixbuf(calculate_frame(progress))
+            self.setIcon(QtGui.QIcon(
+                animation_function(self._original_pixmap, progress)
+            ))
             if self._frame < self._frames:
                 self._frame += 1
-                return True
             elif self._repeat:
                 self._frame = 0
-                return True
             else:
-                # return False -> cancel timeout_add
-                return False
-        glib.timeout_add(self._frame_length_milliseconds, advance_frame)
+                self._timer.stop()
 
-    def stop_animation(self, *args):
+        self._timer.timeout.connect(advance_frame)
+        self._timer.start(self._frame_length_milliseconds)
+
+    def stop_animation(self):
         self._repeat = False
 
-    def shrink(self, *args):
-        self._initialize_animation()
+    def get_animator(
+        self, animation_function, animation_length_seconds=1.0, **kwargs
+    ):
+        """ Creates a function thath animates the icon when invoked.
 
-        def calculate_frame(progress):
-            x = max(1, int(
-                self.icon.get_width() *
-                (1.0 - math.sin(progress * math.pi) ** 2)
-            ))
-            return self.icon.scale_simple(x, x, InterpType.BILINEAR)
-        self._start_animation(calculate_frame)
+        Args:
+            animation_function (string or callable): The function that animates
+                the icon. If not callable it is used as key to access a
+                predefined animation function from `AnimationFunctions`.
+            animation_length_seconds (Optional[float]): Defaults to 1.0.
+                Length in seconds the animation runs (one loop).
+            **kwargs: Keyword arguments are passed to the `animation_function`.
+
+        Returns:
+            callable: When invoked starts the animation.
+        """
+        def animator():
+            self._initialize_animation(animation_length_seconds)
+            if callable(animation_function):
+                self._animate(animation_function)
+            else:
+                self._animate(functools.partial(
+                    getattr(AnimationFunctions, animation_function), **kwargs
+                ))
+        return animator
 
 
-class App:
+class App():
     def __init__(self):
-        self.status_icon = AnimatedStatusIcon('icon.svg')
-        self.status_icon.connect("popup-menu", self.right_click_event)
+        app = QtGui.QApplication([])
+        window = QtGui.QWidget()
 
-        window = gtk.Window()
-        window.connect("destroy", gtk.main_quit)
-        #window.show_all() # only needed if a main window is implemented
+        tray_icon = AnimatedSystemTrayIcon('icon.svg', parent=window)
 
-    def right_click_event(self, icon, button, time):
-        self.menu = gtk.Menu()
+        menu = QtGui.QMenu()
         for (entry, action) in [
-            ('start animation', self.status_icon.shrink),
-            ('stop animation', self.status_icon.stop_animation),
-            ('about', self.show_about_dialog),
-            ('quit', gtk.main_quit),
+            ('start rotate', tray_icon.get_animator('rotate')),
+            ('start shrink', tray_icon.get_animator('shrink', minimum=0.4)),
+            ('stop animation', tray_icon.stop_animation),
+            ('quit', QtGui.qApp.quit),
         ]:
-            menu_item = gtk.MenuItem()
-            menu_item.set_label(entry)
-            menu_item.connect('activate', action)
-            self.menu.append(menu_item)
+            q_action = QtGui.QAction(entry, app)
+            q_action.triggered.connect(action)
+            menu.addAction(q_action)
 
-        self.menu.popup(
-            parent_menu_shell=None, parent_menu_item=None,
-            func=gtk.StatusIcon.position_menu,
-            data=self.status_icon,
-            button=button, activate_time=time
-        )
+        tray_icon.setContextMenu(menu)
+        tray_icon.show()
 
-        self.menu.show_all()
+        app.exec_()
 
-    def show_about_dialog(self, widget):
-        about_dialog = gtk.AboutDialog()
-
-        about_dialog.set_logo(Pixbuf.new_from_file('icon.svg'))
-        about_dialog.set_destroy_with_parent(True)
-        about_dialog.set_program_name("OmniSync")
-        about_dialog.set_website("http://github.com/jandob/omniSync")
-        about_dialog.set_version("0.1")
-        about_dialog.set_authors(["Janosch Dobler", "Torben Sickert"])
-
-        about_dialog.run()
-        about_dialog.destroy()
-
-App()
-signal.signal(signal.SIGINT, signal.SIG_DFL)  # close app on ctrl-c
-gtk.main()
+if __name__ == '__main__':
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    App()
