@@ -6,135 +6,73 @@
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
 import signal
-import math
-import functools
 from PyQt4 import QtGui
 from PyQt4 import QtCore
 
-
-class AnimationFunctions:
-    """
-    Predefined animation functions.
-
-    The functions are called with the following positional arguments:
-    Args:
-        progress(float): The progress of the animation (0.0-1.0).
-        pixmap_original(QPixmap): The original image.
-        **kwargs: Can be used to provide customizable animations.
-    Returns:
-        Qpixmap: A new pixmap that corresponds to the animation `progress`,
-            `pixmap_original` should not be altered.
-
-    """
-    @staticmethod
-    def shrink(pixmap_original, progress, minimum=0.4):
-        shrink_factor = (1.0 - math.sin(progress * math.pi) ** 2)
-        shrink_factor = minimum + ((1 - minimum) * shrink_factor)
-        x = max(1, int(pixmap_original.width() * shrink_factor))
-        return pixmap_original.scaled(
-            x, x, transformMode=QtCore.Qt.SmoothTransformation
-        )
-
-    @staticmethod
-    def rotate(pixmap_original, progress):
-        width = pixmap_original.width()
-        height = pixmap_original.height()
-
-        rotated = QtGui.QPixmap(pixmap_original.transformed(
-            QtGui.QTransform().rotateRadians(progress * 2 * math.pi)
-        ))
-
-        xoffset = (rotated.width() - width) / 2
-        yoffset = (rotated.height() - height) / 2
-
-        return rotated.copy(xoffset, yoffset, width, height)
+from file_watcher import FileQueue
+from sync_api import Rsync
+from animated_system_tray import AnimatedSystemTrayIcon
 
 
-class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
-    def __init__(self, icon_file_name, parent=None):
-        super().__init__(parent)
-        self._original_pixmap = QtGui.QPixmap(icon_file_name)
-        self.setIcon(QtGui.QIcon(self._original_pixmap))
+class App(QtGui.QApplication):
 
-    def _initialize_animation(self, animation_length_seconds):
-        frames_per_second = 24.0
-        self._frame_length_milliseconds = int(1000 / frames_per_second)
-        self._frames = int(animation_length_seconds * frames_per_second)
+    # signals need to be class variables
+    start_animation = QtCore.pyqtSignal()
 
-    def _animate(self, animation_function):
-        self._timer = QtCore.QTimer()
-        self._repeat = True
-        self._frame = 0
-
-        def advance_frame():
-            # animation progress from 0-1
-            progress = self._frame / float(self._frames)
-            self.setIcon(QtGui.QIcon(
-                animation_function(self._original_pixmap, progress)
-            ))
-            if self._frame < self._frames:
-                self._frame += 1
-            elif self._repeat:
-                self._frame = 0
-            else:
-                self._timer.stop()
-
-        self._timer.timeout.connect(advance_frame)
-        self._timer.start(self._frame_length_milliseconds)
-
-    def stop_animation(self):
-        self._repeat = False
-
-    def get_animator(
-        self, animation_function, animation_length_seconds=1.0, **kwargs
-    ):
-        """ Creates a function thath animates the icon when invoked.
-
-        Args:
-            animation_function (string or callable): The function that animates
-                the icon. If not callable it is used as key to access a
-                predefined animation function from `AnimationFunctions`.
-            animation_length_seconds (Optional[float]): Defaults to 1.0.
-                Length in seconds the animation runs (one loop).
-            **kwargs: Keyword arguments are passed to the `animation_function`.
-
-        Returns:
-            callable: When invoked starts the animation.
-        """
-        def animator():
-            self._initialize_animation(animation_length_seconds)
-            if callable(animation_function):
-                self._animate(animation_function)
-            else:
-                self._animate(functools.partial(
-                    getattr(AnimationFunctions, animation_function), **kwargs
-                ))
-        return animator
-
-
-class App():
     def __init__(self):
-        app = QtGui.QApplication([])
-        window = QtGui.QWidget()
+        super().__init__([])
+        self.window = QtGui.QWidget()
 
-        tray_icon = AnimatedSystemTrayIcon('icon.svg', parent=window)
+        self.file_queue = FileQueue()
+        self.rsync = Rsync(
+            self.file_queue, progress_callback=self.handle_sync_progress)
+        self.rsync.start()
 
+        self.tray_icon = AnimatedSystemTrayIcon('icon.svg', parent=self.window)
+
+        # We need to do this with a signal because the animation must be
+        # triggered from the main thread.
+        self.start_animation.connect(
+            #self.tray_icon.get_animator('shrink', minimum=0.4))
+            self.tray_icon.get_animator('rotate'))
+
+        self.build_gui()
+
+    def handle_sync_progress(self, progress):
+        if progress == 0.0:
+            self.start_animation.emit()
+        elif progress == 1.0:
+            self.tray_icon.stop_animation()
+
+    def build_gui(self):
         menu = QtGui.QMenu()
         for (entry, action) in [
-            ('start rotate', tray_icon.get_animator('rotate')),
-            ('start shrink', tray_icon.get_animator('shrink', minimum=0.4)),
-            ('stop animation', tray_icon.stop_animation),
-            ('quit', QtGui.qApp.quit),
+            ('start rotate', self.tray_icon.get_animator('rotate')),
+            ('stop animation', self.tray_icon.stop_animation),
+            ('quit', self.quit),
         ]:
-            q_action = QtGui.QAction(entry, app)
+            q_action = QtGui.QAction(entry, self)
             q_action.triggered.connect(action)
             menu.addAction(q_action)
 
-        tray_icon.setContextMenu(menu)
-        tray_icon.show()
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.show()
 
-        app.exec_()
+    def quit(self, *args, **kwargs):
+        self.file_queue.stop()
+        self.rsync.stop()
+        QtGui.qApp.quit()
+
 
 if __name__ == '__main__':
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    App()
+    app = App()
+
+    # handle sigint gracefully
+    signal.signal(signal.SIGINT, app.quit)
+    # needed to catch the signal (http://stackoverflow.com/a/4939113/2972353)
+    timer = QtCore.QTimer()
+    timer.start(500)
+    timer.timeout.connect(lambda: None)  # Let the interpreter run each 500 ms.
+
+    # start the app
+    app.exec_()
