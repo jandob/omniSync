@@ -11,6 +11,7 @@ from PyQt4 import QtCore
 
 from file_watcher import FileQueue
 from sync_api import Rsync
+from sync_api import Dropbox
 from animated_system_tray import AnimatedSystemTrayIcon
 
 
@@ -27,6 +28,9 @@ class App(QtGui.QApplication):
         self.rsync = Rsync(
             self.file_queue, progress_callback=self.handle_sync_progress)
         self.rsync.start()
+        self.dropbox = Dropbox(
+            self.file_queue, progress_callback=self.handle_sync_progress)
+        self.dropbox.start()
 
         self.tray_icon = AnimatedSystemTrayIcon('icon.svg', parent=self.window)
 
@@ -61,6 +65,7 @@ class App(QtGui.QApplication):
     def quit(self, *args, **kwargs):
         self.file_queue.stop()
         self.rsync.stop()
+        self.dropbox.stop()
         QtGui.qApp.quit()
 
 
