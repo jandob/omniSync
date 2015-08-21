@@ -4,3 +4,4 @@ __pycache__/
 
 # private application data
 dropbox_token.txt
+config.yaml

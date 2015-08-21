@@ -10,21 +10,23 @@ Should support: google drive, dropbox, rsync
 """
 import subprocess
 import re
-import sys
+import os
 
 from threading import Thread
 from time import sleep
-from utils import OrderedSetQueue
+from utils.containers import OrderedSetQueue
+from utils.log import log
+import config
 
 
 class QueueConsumer(Thread):
     def __init__(self, queue=None):
         self.queue = queue or OrderedSetQueue()
         super().__init__()
-        print(self.__class__.__name__ + " init")
+        log.debug(self.__class__.__name__ + " init")
 
     def run(self):
-        print(self.__class__.__name__ + " running")
+        log.debug(self.__class__.__name__ + " running")
         while True:
             item = self.queue.get()
             if item is None:  # trick to break out of while
@@ -35,7 +37,7 @@ class QueueConsumer(Thread):
 
     def stop(self):
         self.queue.put(None)  # trick to break out of while
-        print(self.__class__.__name__ + " stopped")
+        log.debug(self.__class__.__name__ + " stopped")
 
     def consume_item(self, item): raise NotImplementedError
 
@@ -50,26 +52,24 @@ class SyncManager(QueueConsumer):
         """
         super().__init__(queue=file_queue)
         self.progress_callback = progress_callback
-        self.syncers = []
+        self.syncers = {}
         for syncerName in ['Dropbox', 'Rsync']:
             syncer = globals()[syncerName](
                 progress_callback=self.handle_sync_progress)
-            self.syncers.append(syncer)
+            self.syncers[syncerName] = syncer
             syncer.start()
         self.start()
 
-    def handle_sync_progress(self, syncer, event, progress):
-        print("handle sync progress ", progress, syncer)
+    def handle_sync_progress(self, syncer, file, progress):
+        log.info("sync progress " + str(progress) + str(syncer))
 
     def stop(self):
         self.queue.stop()
-        [s.stop() for s in self.syncers]
+        [s.stop() for s in self.syncers.values()]
         super().stop()
 
-    def consume_item(self, item):
-        for syncer in self.syncers:
-            # TODO exclude files for syncers
-            syncer.queue.put(item)
+    def consume_item(self, event):
+        self.syncers[event.info['syncer']].queue.put(event)
 
 
 class SyncBase(QueueConsumer):
@@ -86,10 +86,13 @@ class SyncBase(QueueConsumer):
 
 class Rsync(SyncBase):
     def consume_item(self, event):
-        print("rsync ", event)  # TODO
-        self.progress_callback(self, event, 0.0)
-        cmd = 'rsync --progress --archive --bwlimit=30000 ' + event + ' /home/h4ct1c/omnisync/remote/'
-        print(cmd)
+        self.progress_callback(self, event.pathname, 0.0)
+
+        cmd = 'rsync ' + ' '.join([
+            config.data['watches'][self.__class__.__name__]['arguments'],
+            event.pathname, event.info['target']
+        ])
+        log.info(cmd)
         process = subprocess.Popen(
             cmd, shell=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -104,24 +107,23 @@ class Rsync(SyncBase):
                 progress = next(iter(re.findall(r'(\d+)%', line)), None)
                 #speed = next(iter(re.findall(r'\S*/s', line)), None)
                 if progress:
-                    self.progress_callback(self, event, float(progress) / 100)
+                    self.progress_callback(
+                        self, event.pathname, float(progress) / 100
+                    )
                 line = ''
 
 import dropbox
 
 
 class Dropbox(SyncBase):
-    # Get your app key and secret from the Dropbox developer website
-    APP_KEY = 'hrdd29m6nc8u2sy'
-    APP_SECRET = '175c646bfl1csbu'
-    TOKEN_FILE = 'dropbox_token.txt'
-
     def __init__(self, *args, **kwargs):
+        self.configuration = config.data['configuration'][
+            self.__class__.__name__]
         super().__init__(*args, **kwargs)
 
     def run(self):
         try:
-            with open(self.TOKEN_FILE) as token_file:
+            with open(self.configuration['token_file']) as token_file:
                 self.access_token = token_file.read()
         except IOError:
             self.access_token = None
@@ -131,7 +133,7 @@ class Dropbox(SyncBase):
 
     def authorize(self):
         flow = dropbox.client.DropboxOAuth2FlowNoRedirect(
-            self.APP_KEY, self.APP_SECRET)
+            self.configuration['app_key'], self.configuration['app_secret'])
         authorize_url = flow.start()
 
         print('1. Go to: ' + authorize_url)
@@ -143,21 +145,54 @@ class Dropbox(SyncBase):
         self.access_token, user_id = flow.finish(code)
 
         # save token
-        token_file = open(self.TOKEN_FILE, 'w')
+        token_file = open(self.configuration['token_file'], 'w')
         token_file.write(self.access_token)
         token_file.close()
 
     def login(self):
         if not (self.access_token):
             self.authorize()
-        client = dropbox.client.DropboxClient(self.access_token)
-        print('linked account: ', client.account_info())
+        self.client = dropbox.client.DropboxClient(self.access_token)
+        log.debug('dropbox authorized: ' + self.client.account_info()['email'])
+
+    def upload(self, event, dropbox_path):
+        with open(event.pathname, 'rb') as file:
+            size = os.stat(file.fileno()).st_size
+            if size < 100:
+                self.client.put_file(dropbox_path, file, overwrite=True)
+            else:
+                chunk_size = 1024 * 1024
+                offset = 0
+                upload_id = None
+                last_block = None
+                while offset < size:
+                    next_chunk_size = min(chunk_size, size - offset)
+                    if last_block is None:
+                        last_block = file.read(next_chunk_size)
+                    try:
+                        (offset, upload_id) = self.client.upload_chunk(
+                            last_block, next_chunk_size, offset, upload_id)
+                        self.last_block = None
+                        self.progress_callback(
+                            self, event.pathname, min(offset, size) / size)
+                    except dropbox.rest.ErrorResponse as e:
+                        log.exception(e)
+                self.client.commit_chunked_upload(
+                    dropbox_path, upload_id, overwrite=True, parent_rev=None
+                )
 
     def consume_item(self, event):
-        pass
-        #self.progress_callback(self, event, 0.0)
-        #print("dropbox ", event)  # TODO
-        #sleep(1)
-        #self.progress_callback(self, event, 0.5)
-        #sleep(1)
-        #self.progress_callback(self, event, 1.0)
+        dropbox_path = os.path.join(
+            event.info['target'],
+            os.path.relpath(event.pathname, event.info['source'])
+        )
+        log.info('uploading to Dropbox: ' + str(event.pathname) + ' -> ' +
+                 dropbox_path)
+
+        self.progress_callback(self, event.pathname, 0.0)
+        try:
+            self.upload(event, dropbox_path)
+        except IOError as e:
+            # file was deleted immediatily
+            log.debug('upload failded' + str(e))
+            self.progress_callback(self, event.pathname, 1.0)

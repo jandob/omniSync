@@ -13,8 +13,11 @@ Should support:
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
 import random
-from utils import OrderedSetQueue
+from utils.containers import OrderedSetQueue
+from utils.log import log
 import pyinotify
+import config
+from functools import partial
 
 
 EVENTS = [
@@ -43,35 +46,37 @@ class FileQueue(OrderedSetQueue):
         self.notifier = pyinotify.ThreadedNotifier(wm)
         self.notifier.start()
 
-        exclude_list = [
-            '^/etc/apache[2]?/',
-            '^/etc/rc.*',
-            '^/etc/(fs|m)tab',
-            '^/etc/cron\..*']
-
-        # Add watches
         events = 0
         for e in EVENTS:
             events |= pyinotify.EventsCodes.ALL_FLAGS[e]
 
-        watch_descriptor = wm.add_watch(
-            ['/home/h4ct1c/omnisync/local', '/etc/test'],
-            events,
-            rec=True,
-            auto_add=True,
-            proc_fun=self.process_event,
-            exclude_filter=pyinotify.ExcludeFilter(exclude_list))
+        # Add watches
 
-    def process_event(self, event):
-        file_name = event.name
-        path = event.pathname
-        isdir = event.dir
+        config.load()
+        #config.save()
+        for watch in config.data['watches']:
+            if not watch.get('disabled'):
+                watch_descriptors = wm.add_watch(
+                    watch['source'], events,
+                    rec=True, auto_add=True,
+                    proc_fun=partial(self.process_event, {
+                        'syncer': watch['syncer'],
+                        'target': watch['target'],
+                        'source': watch['source']
+                    }),
+                    exclude_filter=pyinotify.ExcludeFilter(watch['exclude'])
+                )
+
+    def process_event(self, event_info, event):
+        #file_name = event.name
+        #isdir = event.dir
         event_type = event.maskname
-        print(path, ': ', event_type)
-        self.put(event.pathname)
+        path = event.pathname
+        event.info = event_info
+        log.debug(path + ': ' + event_type)
+        self.put(event)
 
     def stop(self):
         self.notifier.stop()
-        print(self.__class__.__name__ + " stopped")
 
     def save(self): raise NotImplementedError
