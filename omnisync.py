@@ -10,8 +10,7 @@ from PyQt4 import QtGui
 from PyQt4 import QtCore
 
 from file_watcher import FileQueue
-from sync_api import Rsync
-from sync_api import Dropbox
+from sync_api import SyncManager
 from animated_system_tray import AnimatedSystemTrayIcon
 
 
@@ -23,16 +22,10 @@ class App(QtGui.QApplication):
     def __init__(self):
         super().__init__([])
         self.window = QtGui.QWidget()
-
-        self.file_queue = FileQueue()
-        self.rsync = Rsync(
-            self.file_queue, progress_callback=self.handle_sync_progress)
-        self.rsync.start()
-        self.dropbox = Dropbox(
-            self.file_queue, progress_callback=self.handle_sync_progress)
-        self.dropbox.start()
-
         self.tray_icon = AnimatedSystemTrayIcon('icon.svg', parent=self.window)
+
+        self.sync_manager = SyncManager(
+            FileQueue(), progress_callback=self.handle_sync_progress)
 
         # We need to do this with a signal because the animation must be
         # triggered from the main thread.
@@ -63,9 +56,7 @@ class App(QtGui.QApplication):
         self.tray_icon.show()
 
     def quit(self, *args, **kwargs):
-        self.file_queue.stop()
-        self.rsync.stop()
-        self.dropbox.stop()
+        self.sync_manager.stop()
         QtGui.qApp.quit()
 
 

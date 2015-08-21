@@ -13,7 +13,7 @@ Should support:
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
 import random
-from queue import Queue
+from utils import OrderedSetQueue
 import pyinotify
 
 
@@ -24,7 +24,7 @@ EVENTS = [
     'IN_DELETE',        # Subfile was deleted
     'IN_DELETE_SELF',   # Self (watched item itself) was deleted
     'IN_MOVE_SELF',     # Self (watched item itself) was moved
-    'IN_MODIFY',        # File was modified
+    #'IN_MODIFY',        # File was modified
     'IN_ATTRIB',        # Metadata changed
     #'IN_CLOSE_WRITE',   # Writable file was closed
     #'IN_ACCESS',        # File was accessed
@@ -33,7 +33,7 @@ EVENTS = [
 ]
 
 
-class FileQueue(Queue):
+class FileQueue(OrderedSetQueue):
     def __init__(self):
         super().__init__()
         # Instanciate a new WatchManager (will be used to store watches).
@@ -55,7 +55,7 @@ class FileQueue(Queue):
             events |= pyinotify.EventsCodes.ALL_FLAGS[e]
 
         watch_descriptor = wm.add_watch(
-            ['/etc/hans', '/tmp'],
+            ['/home/h4ct1c/omnisync/local', '/etc/test'],
             events,
             rec=True,
             auto_add=True,
@@ -68,10 +68,10 @@ class FileQueue(Queue):
         isdir = event.dir
         event_type = event.maskname
         print(path, ': ', event_type)
-        self.put(path)
+        self.put(event.pathname)
 
     def stop(self):
         self.notifier.stop()
-        print("file watcher stopped")
+        print(self.__class__.__name__ + " stopped")
 
     def save(self): raise NotImplementedError
