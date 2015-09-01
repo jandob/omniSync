@@ -13,8 +13,6 @@ Should support:
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
 import os
-import random
-from copy import deepcopy
 from functools import partial
 import pyinotify
 
@@ -30,7 +28,7 @@ EVENTS = [
     'DELETE_SELF',   # Self (watched item itself) was deleted
     'MOVE_SELF',     # Self (watched item itself) was moved
     'ATTRIB',        # Metadata changed
-    #'MODIFY',        # File was modified
+    'MODIFY',        # File was modified
     #'CLOSE_WRITE',   # Writable file was closed
     #'ACCESS',        # File was accessed
     #'CLOSE_NOWRITE', # Unwritable file closed
@@ -47,7 +45,7 @@ class InotifyEvent():
         self.isdir = event.dir
         self.target_dir = watch_config['target']  # target dir
         self.source_dir = watch_config['source']  # source dir
-        self.syncer = watch_config['syncer']
+        self.syncers = watch_config['syncers']
         self.config = watch_config
 
         self.source_relative = os.path.join(
@@ -58,7 +56,7 @@ class InotifyEvent():
         )
         self.moved_from_path = getattr(event, 'src_pathname', None)
         log.debug('EVENT %s (%s): %s ' % (
-            self.type, self.syncer, self.source_absolute))
+            self.type, self.syncers, self.source_absolute))
 
     @property
     def type(self):
@@ -68,7 +66,7 @@ class InotifyEvent():
         return pyinotify.EventsCodes.ALL_VALUES[mask][3:]
 
     def _key(self):
-            return self.source_absolute
+            return self.source_absolute + '__' + self.type
 
     def __eq__(self, other):
             return self._key() == other._key()
@@ -77,7 +75,7 @@ class InotifyEvent():
             return self._key() != other._key()
 
     def __hash__(self):
-            return hash(self.source_dir)
+            return hash(self._key())
 
 
 class FileQueue(OrderedSetQueue):
@@ -87,20 +85,22 @@ class FileQueue(OrderedSetQueue):
         wm = pyinotify.WatchManager()
         # Associate this WatchManager with a Notifier (will be used to report
         # and process events).
-        self.notifier = pyinotify.ThreadedNotifier(wm)
+        self.notifier = pyinotify.ThreadedNotifier(wm, self.process_event,
+            read_freq=2)
         self.notifier.start()
 
         events = 0
         for e in map(lambda x: 'IN_' + x, EVENTS):
             events |= pyinotify.EventsCodes.ALL_FLAGS[e]
 
+        self.watches = []
         # Add watches
 
         config.load()
         #config.save()
         for watch_config in config.data['watches']:
             if not watch_config.get('disabled'):
-                watch_descriptors = wm.add_watch(
+                wm.add_watch(
                     watch_config['source'], events, rec=True, auto_add=True,
                     proc_fun=partial(self.process_event, watch_config),
                     exclude_filter=pyinotify.ExcludeFilter(
@@ -108,10 +108,13 @@ class FileQueue(OrderedSetQueue):
                 )
 
     def process_event(self, watch_config, event):
-        #print(watch_config['syncer'])
         self.put(InotifyEvent(event, watch_config))
 
     def stop(self):
         self.notifier.stop()
 
     def save(self): raise NotImplementedError
+
+
+if __name__ == '__main__':
+    FileQueue()

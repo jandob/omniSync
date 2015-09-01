@@ -21,11 +21,12 @@ class Rsync(SyncBase):
         cmd = ' '.join([
             'cd', event.source_dir, '&&', 'rsync',
             '--relative',
-            config.data['configuration'][self.class_name]['arguments'],
+            config.data['configuration'][self.name]['arguments'],
             event.source_relative, event.target_dir
         ])
         log.info(cmd)
         process = subprocess.Popen(
+            # TODO cmd can be list; TODO shell not needed?
             cmd, shell=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         )
@@ -66,15 +67,15 @@ class Rsync(SyncBase):
             pull==True pull from target (overwriting source)
         """
         for watch_config in filter(
-            lambda x: x['syncer'] == self.class_name and not x.get('disabled'),
+            lambda x: self.name in x['syncers'] and not x.get('disabled'),
             config.data['watches']
         ):
             self.progress_callback(self, watch_config['source'], 0.0)
             excludes = ' '.join(
-                ['--exclude=' + x for x in watch_config['exclude']])
+                ['--exclude=' + x for x in watch_config.get('exclude', [])])
             cmd = ' '.join([
                 'rsync', '--info=progress2', excludes,
-                config.data['configuration'][self.class_name]['arguments']
+                config.data['configuration'][self.name]['arguments']
             ]) + ' '
             if pull:
                 cmd += ' '.join([

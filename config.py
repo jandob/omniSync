@@ -16,6 +16,7 @@ def save():
     with open(_config_filename, 'w') as stream:
         yaml.dump(data, stream)
 
+load()
 
 ## json
 #import json

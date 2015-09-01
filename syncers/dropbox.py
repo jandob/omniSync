@@ -54,6 +54,7 @@ class Dropbox(SyncBase):
         size = os.stat(file.fileno()).st_size
         if size < 100:
             self.client.put_file(dropbox_path, file, overwrite=True)
+            self.progress_callback(self, event.source_absolute, 1.0)
         else:
             chunk_size = 1024 * 1024
             offset = 0

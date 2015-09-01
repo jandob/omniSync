@@ -9,6 +9,9 @@ import signal
 from PyQt4 import QtGui
 from PyQt4 import QtCore
 
+import sys
+sys.dont_write_bytecode = True
+
 from file_watcher import FileQueue
 from sync_api import SyncManager
 from animated_system_tray import AnimatedSystemTrayIcon

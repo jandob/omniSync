@@ -9,7 +9,6 @@ Should support: google drive, dropbox, rsync
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
 
-from importlib.machinery import SourceFileLoader
 from threading import Thread
 from importlib import import_module
 
@@ -17,6 +16,7 @@ from utils.containers import OrderedSetQueue
 from utils.log import log
 from utils.strings import underscore
 import config
+
 
 class QueueConsumer(Thread):
     def __init__(self, queue=None):
@@ -50,7 +50,7 @@ class SyncBase(QueueConsumer):
                 Range: 0.0 - 1.0
         """
         super().__init__()
-        self.class_name = self.__class__.__name__
+        self.name = self.__class__.__name__
         self.progress_callback = progress_callback
 
 
@@ -73,11 +73,13 @@ class SyncManager(QueueConsumer):
         # module: underscore
         # class: camelcase
         self.syncers = {}
-        watch_configs = filter(
+        syncers_lists = [x['syncers'] for x in filter(
             lambda x: not x.get('disabled'), config.data['watches']
-        )
-        # set comprehension to start only one instance for every syncer.
-        for syncer in {x['syncer'] for x in watch_configs}:
+        )]
+        # flatten list of lists and make vals unique via set comprehension
+        # (start only one instance for every syncer)
+        enabled_syncers = {val for sublist in syncers_lists for val in sublist}
+        for syncer in enabled_syncers:
             syncer_instance = getattr(
                 import_module('syncers.' + underscore(syncer)),
                 syncer)(progress_callback=self.handle_sync_progress)
@@ -93,4 +95,5 @@ class SyncManager(QueueConsumer):
         super().stop()
 
     def consume_item(self, event):
-        self.syncers[event.syncer].queue.put(event)
+        for syncer in event.syncers:
+            self.syncers[syncer].queue.put(event)
