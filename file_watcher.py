@@ -13,10 +13,8 @@ Should support:
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
 import os
-from functools import partial
 import pyinotify
 
-import config
 from utils.containers import OrderedSetQueue
 from utils.log import log
 
@@ -63,10 +61,10 @@ class InotifyEvent():
         mask = self._mask
         if self.isdir:
             mask -= pyinotify.IN_ISDIR
-        return pyinotify.EventsCodes.ALL_VALUES[mask][3:]
+        return pyinotify.EventsCodes.ALL_VALUES.get(mask, 'IN_UNDEFINED')[3:]
 
     def _key(self):
-            return self.source_absolute + '__' + self.type
+            return self.source_absolute + '__' + str(self.syncers)
 
     def __eq__(self, other):
             return self._key() == other._key()
@@ -79,42 +77,44 @@ class InotifyEvent():
 
 
 class FileQueue(OrderedSetQueue):
-    def __init__(self):
-        super().__init__()
+
+    def save(self): raise NotImplementedError
+
+
+class FileWatcher():
+
+    def __init__(self, queue, watch_config):
+        self.queue = queue
+        self.watch_config = watch_config
         # Instanciate a new WatchManager (will be used to store watches).
         wm = pyinotify.WatchManager()
         # Associate this WatchManager with a Notifier (will be used to report
         # and process events).
-        self.notifier = pyinotify.ThreadedNotifier(wm, self.process_event,
-            read_freq=2)
+        self.notifier = pyinotify.ThreadedNotifier(
+            wm, self.process_event, read_freq=2)
         self.notifier.start()
 
         events = 0
         for e in map(lambda x: 'IN_' + x, EVENTS):
             events |= pyinotify.EventsCodes.ALL_FLAGS[e]
 
-        self.watches = []
-        # Add watches
+        wm.add_watch(
+            self.watch_config['source'], events, rec=True, auto_add=True,
+            proc_fun=self.process_event,
+            exclude_filter=pyinotify.ExcludeFilter(
+                self.watch_config.get('exclude', []))
+        )
 
-        config.load()
-        #config.save()
-        for watch_config in config.data['watches']:
-            if not watch_config.get('disabled'):
-                wm.add_watch(
-                    watch_config['source'], events, rec=True, auto_add=True,
-                    proc_fun=partial(self.process_event, watch_config),
-                    exclude_filter=pyinotify.ExcludeFilter(
-                        watch_config.get('exclude', []))
-                )
-
-    def process_event(self, watch_config, event):
-        self.put(InotifyEvent(event, watch_config))
+    def process_event(self, event):
+        self.queue.put(InotifyEvent(event, self.watch_config))
 
     def stop(self):
         self.notifier.stop()
 
-    def save(self): raise NotImplementedError
-
 
 if __name__ == '__main__':
-    FileQueue()
+    import config
+    q = FileQueue()
+    for watch_config in config.data['watches']:
+        if not watch_config.get('disabled'):
+            FileWatcher(q, watch_config)

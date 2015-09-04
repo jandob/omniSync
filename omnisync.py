@@ -12,7 +12,9 @@ from PyQt4 import QtCore
 import sys
 sys.dont_write_bytecode = True
 
+import config
 from file_watcher import FileQueue
+from file_watcher import FileWatcher
 from sync_api import SyncManager
 from animated_system_tray import AnimatedSystemTrayIcon
 
@@ -27,8 +29,19 @@ class App(QtGui.QApplication):
         self.window = QtGui.QWidget()
         self.tray_icon = AnimatedSystemTrayIcon('icon.svg', parent=self.window)
 
+        self.file_queue = FileQueue()
+        self.watchers = []
+        self.progress = {}
+        self.progress_menu_items = {}
+        for watch_config in config.data['watches']:
+            if not watch_config.get('disabled'):
+                self.watchers.append(
+                    FileWatcher(self.file_queue, watch_config))
         self.sync_manager = SyncManager(
-            FileQueue(), progress_callback=self.handle_sync_progress)
+            self.file_queue, progress_callback=self.handle_sync_progress)
+
+        self.progress = {syncer: 1.0 for syncer in
+                         self.sync_manager.syncers.values()}
 
         # We need to do this with a signal because the animation must be
         # triggered from the main thread.
@@ -38,11 +51,23 @@ class App(QtGui.QApplication):
 
         self.build_gui()
 
-    def handle_sync_progress(self, progress):
-        if progress == 0.0:
+    def show_progress(self):
+        for syncer, val in self.progress.items():
+            item = self.progress_menu_items.get(syncer.name, None)
+            if item:
+                item.setText(
+                    '%s: %0.0f%% (queue: %s)'
+                    % (syncer.name, val * 100, syncer.queue.qsize())
+                )
+
+    def handle_sync_progress(self, syncer, file, progress):
+        self.progress[syncer] = progress
+        progresses = self.progress.values()
+        if any([val == 0.0 for val in progresses]):
             self.start_animation.emit()
-        elif progress == 1.0:
+        if all([val == 1.0 for val in progresses]):
             self.tray_icon.stop_animation()
+        self.show_progress()
 
     def build_gui(self):
         menu = QtGui.QMenu()
@@ -55,10 +80,18 @@ class App(QtGui.QApplication):
             q_action.triggered.connect(action)
             menu.addAction(q_action)
 
+        menu.addSeparator()
+        menu.setSeparatorsCollapsible(True)
+        for syncer in self.progress:
+            q_action = QtGui.QAction(syncer.name, self)
+            self.progress_menu_items[syncer.name] = q_action
+            menu.addAction(q_action)
+
         self.tray_icon.setContextMenu(menu)
         self.tray_icon.show()
 
     def quit(self, *args, **kwargs):
+        [w.stop() for w in self.watchers]
         self.sync_manager.stop()
         QtGui.qApp.quit()
 

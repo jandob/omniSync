@@ -53,6 +53,12 @@ class SyncBase(QueueConsumer):
         self.name = self.__class__.__name__
         self.progress_callback = progress_callback
 
+    def fullsync(self, pull=False):
+        """
+            pull==True pull from target (overwriting source)
+        """
+        raise NotImplementedError
+
 
 class SyncManager(QueueConsumer):
     """ Manages the different file uploaders.
@@ -87,12 +93,16 @@ class SyncManager(QueueConsumer):
             syncer_instance.start()
 
     def handle_sync_progress(self, syncer, file, progress):
-        log.info("sync progress " + str(progress) + str(syncer))
+        log.info("%s: %s %s" % (syncer.name, progress, file))
+        self.progress_callback(syncer, file, progress)
 
     def stop(self):
-        self.queue.stop()
         [s.stop() for s in self.syncers.values()]
         super().stop()
+
+    def fullsync(self, pull=False):
+        for syncer in self.syncers.values():
+            syncer.fullsync()
 
     def consume_item(self, event):
         for syncer in event.syncers:

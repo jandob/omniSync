@@ -54,6 +54,7 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
         super().__init__(parent)
         self._original_pixmap = QtGui.QPixmap(icon_file_name)
         self.setIcon(QtGui.QIcon(self._original_pixmap))
+        self.animating = False
 
     def _initialize_animation(self, animation_length_seconds):
         frames_per_second = 24.0
@@ -61,6 +62,8 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
         self._frames = int(animation_length_seconds * frames_per_second)
 
     def _animate(self, animation_function):
+        if self.animating: return
+        self.animating = True
         self._timer = QtCore.QTimer()
         self._repeat = True
         self._frame = 0
@@ -77,6 +80,7 @@ class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
                 self._frame = 0
             else:
                 self._timer.stop()
+                self.animating = False
 
         self._timer.timeout.connect(advance_frame)
         self._timer.start(self._frame_length_milliseconds)

@@ -14,50 +14,55 @@ from utils.log import log
 class Rsync(SyncBase):
     def __init__(self, progress_callback=None):
         super().__init__(progress_callback)
-        self.fullsync()
 
     def push(self, event):
+        if event.isdir:
+            print('dir skipped (TODO)')
+            return
         self.progress_callback(self, event.source_absolute, 0.0)
-        cmd = ' '.join([
-            'cd', event.source_dir, '&&', 'rsync',
-            '--relative',
-            config.data['configuration'][self.name]['arguments'],
-            event.source_relative, event.target_dir
-        ])
-        log.info(cmd)
+        cmd = ['rsync', '--relative'] + \
+            config.data['configuration'][self.name]['arguments'] + \
+            [event.source_relative, event.target_dir]
+        #log.info(cmd)
         process = subprocess.Popen(
-            # TODO cmd can be list; TODO shell not needed?
-            cmd, shell=True,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            cwd=event.source_dir
         )
         self.parse_output(process, event.source_absolute)
 
     def parse_output(self, process, name):
         # parse rsync output
         line = ''
+        progress = None
         while process.poll() is None:
             byte = process.stdout.read(1)
             line += byte.decode('utf-8')
             if byte == b'\r' or byte == b'\n':
                 #speed = next(iter(re.findall(r'\S*/s', line)), None)
                 #files = next(iter(re.findall(r'(\d)/(\d+)', line)), None)
-                progress = next(iter(re.findall(r'(\d+)%', line)), None)
-                if progress:
+                new_progress = next(iter(re.findall(r'(\d+)%', line)), None)
+                if new_progress != progress:
+                    progress = new_progress
                     self.progress_callback(
                         self, name, float(progress) / 100)
                 line = ''
+        if progress != '100':
+            self.progress_callback(self, name, 1.0)
 
     def delete(self, event):
+
         self.progress_callback(self, event.source_absolute, 0.0)
-        cmd = ' '.join([
+        cmd = [
             'rm', os.path.join(event.target_dir, event.source_relative)
-        ])
+        ]
+        if event.isdir:
+            cmd[0] = ['rmdir']
         log.info(cmd)
-        subprocess.check_call(cmd, shell=True)
+        subprocess.check_call(cmd)
         self.progress_callback(self, event.source_absolute, 1.0)
 
     def consume_item(self, event):
-        if event.type in ['delete', 'moved_from']:
+        if event.type in ['DELETE', 'MOVED_FROM']:
             self.delete(event)
         else:
             self.push(event)
