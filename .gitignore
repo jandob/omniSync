@@ -1,6 +1,7 @@
-# Byte-compiled / optimized / DLL files
+# Byte-compiled / optimized / DLL files / Caches
 __pycache__/
 *.py[cod]
+.cache
 
 # private application data
 dropbox_token.txt
