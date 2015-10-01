@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
+import builtins
 import sys
 import os
 sys.path.append(os.path.abspath(sys.path[0] + os.sep + '..'))
+
 import subprocess
 import re
 
@@ -13,20 +15,39 @@ from utils.log import log
 
 class Rsync(SyncBase):
     def __init__(self, progress_callback=None):
-        super().__init__(progress_callback)
+        builtins.super(self.__class__, self).__init__(progress_callback)
 
-    def push(self, event):
+    @staticmethod
+    def event_hash_function(event):
+        # use base_path as hash in order to prevent overflowing the queue
         if event.isdir:
+            return event.source_absolute
+        return event.base_path
+
+    def push_dir(self, event):
+        self.progress_callback(self, event.source_absolute, 0.0)
+        cmd = ['rsync', '--no-r'] + \
+            config.data['configuration'][self.name]['arguments'] + \
+            [event.base_path, event.target_base_dir_absolute]
+        log.info(cmd)
+        process = subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        )
+        self.parse_output(process, event.source_absolute)
+
+    def push_file(self, event):
+        # currently not used
+        if not event.isdir:
             print('dir skipped (TODO)')
             return
         self.progress_callback(self, event.source_absolute, 0.0)
         cmd = ['rsync', '--relative'] + \
             config.data['configuration'][self.name]['arguments'] + \
-            [event.source_relative, event.target_dir]
+            [event.source_relative, event.target_base_dir]
         #log.info(cmd)
         process = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            cwd=event.source_dir
+            cwd=event.source_base_dir
         )
         self.parse_output(process, event.source_absolute)
 
@@ -41,7 +62,7 @@ class Rsync(SyncBase):
                 #speed = next(iter(re.findall(r'\S*/s', line)), None)
                 #files = next(iter(re.findall(r'(\d)/(\d+)', line)), None)
                 new_progress = next(iter(re.findall(r'(\d+)%', line)), None)
-                if new_progress != progress:
+                if new_progress and new_progress != progress:
                     progress = new_progress
                     self.progress_callback(
                         self, name, float(progress) / 100)
@@ -53,10 +74,10 @@ class Rsync(SyncBase):
 
         self.progress_callback(self, event.source_absolute, 0.0)
         cmd = [
-            'rm', os.path.join(event.target_dir, event.source_relative)
+            'rm', os.path.join(event.target_base_dir, event.source_relative)
         ]
         if event.isdir:
-            cmd[0] = ['rmdir']
+            cmd = ['rm', '-rf'] + cmd[1:]
         log.info(cmd)
         subprocess.check_call(cmd)
         self.progress_callback(self, event.source_absolute, 1.0)
@@ -65,7 +86,8 @@ class Rsync(SyncBase):
         if event.type in ['DELETE', 'MOVED_FROM']:
             self.delete(event)
         else:
-            self.push(event)
+            #self.push_file(event)
+            self.push_dir(event)
 
     def fullsync(self, pull=False):
         """

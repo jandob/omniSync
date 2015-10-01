@@ -1,7 +1,4 @@
-# omniSync
-dependencies:
-- gtk3
-- python-gobject
+# omniSync (under heavy development)
 
 ## concepts
 - local changes are synced automatically (cheap incremental updates)

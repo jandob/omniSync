@@ -2,6 +2,7 @@
 import logging
 import logging.handlers
 
+from builtins import super
 from logutils.colorize import ColorizingStreamHandler
 
 
@@ -18,8 +19,8 @@ class ColorHandler(ColorizingStreamHandler):
         }
 
 
-#log = logging.getLogger('mainLogger')
-log = logging.getLogger()
+log = logging.getLogger('mainLogger')
+#log = logging.getLogger()
 log.setLevel(logging.DEBUG)
 
 log.addHandler(ColorHandler())

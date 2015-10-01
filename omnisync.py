@@ -5,12 +5,14 @@
    http://google.github.io/styleguide/pyguide.html
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
-import signal
-from PyQt4 import QtGui
-from PyQt4 import QtCore
-
 import sys
 sys.dont_write_bytecode = True
+
+import signal
+import builtins
+
+from PyQt4 import QtGui
+from PyQt4 import QtCore
 
 import config
 from file_watcher import FileQueue
@@ -19,29 +21,36 @@ from sync_api import SyncManager
 from animated_system_tray import AnimatedSystemTrayIcon
 
 
-class App(QtGui.QApplication):
-
-    # signals need to be class variables
-    start_animation = QtCore.pyqtSignal()
-
-    def __init__(self):
-        super().__init__([])
-        self.window = QtGui.QWidget()
-        self.tray_icon = AnimatedSystemTrayIcon('icon.svg', parent=self.window)
-
+class Omnisync():
+    def __init__(self, progress_callback):
         self.file_queue = FileQueue()
         self.watchers = []
-        self.progress = {}
-        self.progress_menu_items = {}
         for watch_config in config.data['watches']:
             if not watch_config.get('disabled'):
                 self.watchers.append(
                     FileWatcher(self.file_queue, watch_config))
         self.sync_manager = SyncManager(
-            self.file_queue, progress_callback=self.handle_sync_progress)
+            self.file_queue, progress_callback=progress_callback)
 
+    def stop(self):
+        [w.stop() for w in self.watchers]
+        self.sync_manager.stop()
+
+
+class Gui(QtGui.QApplication):
+    # signals need to be class variables
+    start_animation = QtCore.pyqtSignal()
+
+    def __init__(self):
+        builtins.super(self.__class__, self).__init__([])
+
+        self.window = QtGui.QWidget()
+        self.tray_icon = AnimatedSystemTrayIcon('icon.svg', parent=self.window)
+
+        self.omni_sync = Omnisync(self.handle_sync_progress)
         self.progress = {syncer: 1.0 for syncer in
-                         self.sync_manager.syncers.values()}
+                         self.omni_sync.sync_manager.syncers.values()}
+        self.progress_menu_items = {}
 
         # We need to do this with a signal because the animation must be
         # triggered from the main thread.
@@ -91,13 +100,12 @@ class App(QtGui.QApplication):
         self.tray_icon.show()
 
     def quit(self, *args, **kwargs):
-        [w.stop() for w in self.watchers]
-        self.sync_manager.stop()
+        self.omni_sync.stop()
         QtGui.qApp.quit()
 
 
 if __name__ == '__main__':
-    app = App()
+    app = Gui()
 
     # handle sigint gracefully
     signal.signal(signal.SIGINT, app.quit)
@@ -107,4 +115,4 @@ if __name__ == '__main__':
     timer.timeout.connect(lambda: None)  # Let the interpreter run each 500 ms.
 
     # start the app
-    app.exec_()
+    sys.exit(app.exec_())

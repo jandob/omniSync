@@ -49,7 +49,6 @@ class OrderedSetQueue(queue.Queue):
                     def __hash__(self):
                             return hash(self._key())
 
-    :author: lalinsky@gmail.com (Lukáš Lalinský)
     :url: http://stackoverflow.com/questions/1581895/how-check-if-a-task-is-already-in-python-queue
     """
 

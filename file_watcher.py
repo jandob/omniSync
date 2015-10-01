@@ -35,31 +35,40 @@ EVENTS = [
 
 
 class InotifyEvent():
-    def __init__(self, event, watch_config):
-        self._mask = event.mask
-        self.file_name = event.name
-        #self.base_path = event.path  # path without filename/foldername
-        self.source_absolute = event.pathname  # path with filename/foldername
-        self.isdir = event.dir
-        self.target_dir = watch_config['target']  # target dir
-        self.source_dir = watch_config['source']  # source dir
+    def __init__(self, event, watch_config, **kwargs):
+        self._mask = getattr(event, 'mask', None)
+        self.file_name = getattr(event, 'name', None)
+        # path without filename/foldername
+        self.base_path = getattr(event, 'path', None)
+        # path with filename/foldername
+        self.source_absolute = getattr(event, 'pathname', None)
+        self.isdir = getattr(event, 'dir', None)
+        self.type = self.get_type()
+        self.__dict__.update(kwargs)
+        self.target_base_dir = watch_config['target']  # target dir
+        self.source_base_dir = watch_config['source']  # source dir
         self.syncers = watch_config['syncers']
         self.config = watch_config
 
         self.source_relative = os.path.join(
-            os.path.relpath(self.source_absolute, self.source_dir)
+            os.path.relpath(self.source_absolute, self.source_base_dir)
+        )
+        self.source_base_dir_relative = os.path.join(
+            os.path.relpath(self.base_path, self.source_base_dir)
         )
         self.target_absolute = os.path.join(
-            self.target_dir, self.source_relative
+            self.target_base_dir, self.source_relative
         )
+        self.target_base_dir_absolute = os.path.normpath(os.path.join(
+            self.target_base_dir, self.source_base_dir_relative
+        ))
         self.moved_from_path = getattr(event, 'src_pathname', None)
         log.debug('EVENT %s (%s): %s ' % (
             self.type, self.syncers, self.source_absolute))
 
-    @property
-    def type(self):
+    def get_type(self):
         mask = self._mask
-        if self.isdir:
+        if self.isdir and mask:
             mask -= pyinotify.IN_ISDIR
         return pyinotify.EventsCodes.ALL_VALUES.get(mask, 'IN_UNDEFINED')[3:]
 
@@ -106,7 +115,9 @@ class FileWatcher():
         )
 
     def process_event(self, event):
-        self.queue.put(InotifyEvent(event, self.watch_config))
+        inotify_event = InotifyEvent(event, self.watch_config)
+        if inotify_event.type in EVENTS:  # Guard against undefined/ignored
+            self.queue.put(InotifyEvent(event, self.watch_config))
 
     def stop(self):
         self.notifier.stop()

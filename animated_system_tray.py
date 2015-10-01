@@ -5,6 +5,7 @@
    http://google.github.io/styleguide/pyguide.html
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
+import builtins
 import math
 import functools
 from PyQt4 import QtGui
@@ -51,7 +52,7 @@ class AnimationFunctions:
 
 class AnimatedSystemTrayIcon(QtGui.QSystemTrayIcon):
     def __init__(self, icon_file_name, parent=None):
-        super().__init__(parent)
+        builtins.super(self.__class__, self).__init__(parent)
         self._original_pixmap = QtGui.QPixmap(icon_file_name)
         self.setIcon(QtGui.QIcon(self._original_pixmap))
         self.animating = False

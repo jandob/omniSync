@@ -8,9 +8,11 @@ Should support: google drive, dropbox, rsync
    http://google.github.io/styleguide/pyguide.html
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
+from builtins import super
 
 from threading import Thread
 from importlib import import_module
+
 
 from utils.containers import OrderedSetQueue
 from utils.log import log
@@ -51,7 +53,19 @@ class SyncBase(QueueConsumer):
         """
         super().__init__()
         self.name = self.__class__.__name__
-        self.progress_callback = progress_callback
+        self.progress = 1.0
+        def send_progress(syncer, event, progress):
+            self.progress = progress
+            progress_callback(syncer, event, progress)
+        self.send_progress = send_progress
+
+
+    @staticmethod
+    def event_hash_function(event):
+        return None
+
+    def init(self):
+        raise NotImplementedError
 
     def fullsync(self, pull=False):
         """
@@ -59,6 +73,38 @@ class SyncBase(QueueConsumer):
         """
         raise NotImplementedError
 
+    def walk(self, remote_path):
+        """
+        Return list of all files/folders under given remote_path
+        """
+        raise NotImplementedError
+
+    def rm(self, remote):
+        raise NotImplementedError
+
+    def download(self, local, remote):
+        """
+        Download a single file
+        """
+        raise NotImplementedError
+
+    def upload(self, local, remote):
+        """
+        Upload a single file
+        """
+        raise NotImplementedError
+
+    def pull(self, local, remote):
+        """
+
+        """
+        raise NotImplementedError
+
+    def push(self, local, remote):
+        raise NotImplementedError
+
+    def fullsync(self, local, remote):
+        raise NotImplementedError
 
 class SyncManager(QueueConsumer):
     """ Manages the different file uploaders.
@@ -100,10 +146,13 @@ class SyncManager(QueueConsumer):
         [s.stop() for s in self.syncers.values()]
         super().stop()
 
-    def fullsync(self, pull=False):
+    def fullsync(self):
         for syncer in self.syncers.values():
             syncer.fullsync()
 
     def consume_item(self, event):
         for syncer in event.syncers:
+            if self.syncers[syncer].event_hash_function(event) is not None:
+                # monkey patch the event hash function
+                event.__hash__ = self.syncers[syncer].event_hash_function
             self.syncers[syncer].queue.put(event)
