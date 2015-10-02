@@ -12,8 +12,10 @@ from builtins import super
 
 from threading import Thread
 from importlib import import_module
+import pkgutil
+import pyclbr
 
-
+import syncers
 from utils.containers import OrderedSetQueue
 from utils.log import log
 from utils.strings import underscore
@@ -119,11 +121,23 @@ class SyncManager(QueueConsumer):
         self.start_syncers()
         self.start()
 
+    def _find_modules_with_super_class(self, pkg, super_class):
+        found_classes = {}
+        for importer, modname, ispkg in pkgutil.iter_modules(pkg.__path__):
+            if ispkg:
+                log.info(
+                    'Found package in syncers plugin directory, skipping!')
+                continue
+            import_path = "%s.%s" % (pkg.__name__, modname)
+            module = pyclbr.readmodule(import_path)
+            for item, val in module.items():
+                if super_class.__name__ in val.super:
+                    found_classes[item] = import_path
+        return found_classes
+
     def start_syncers(self):
         # Import syncers from 'syncers' package and start them.
-        # e.g. from syncers.dropbox import Dropbox
-        # module: underscore
-        # class: camelcase
+        # Does something like: from syncers.dropbox import Dropbox
         self.syncers = {}
         syncers_lists = [x['syncers'] for x in filter(
             lambda x: not x.get('disabled'), config.data['watches']
@@ -131,10 +145,16 @@ class SyncManager(QueueConsumer):
         # flatten list of lists and make vals unique via set comprehension
         # (start only one instance for every syncer)
         enabled_syncers = {val for sublist in syncers_lists for val in sublist}
+
+        # find classes inside syncers package that have the superclass SyncBase
+        available_syncers = self._find_modules_with_super_class(
+                syncers, SyncBase)
+        log.debug('available_syncers: %s' % available_syncers)
+
         for syncer in enabled_syncers:
             syncer_instance = getattr(
-                import_module('syncers.' + underscore(syncer)),
-                syncer)(progress_callback=self.handle_sync_progress)
+                import_module(available_syncers[syncer]), syncer
+            )(progress_callback=self.handle_sync_progress)
             self.syncers[syncer] = syncer_instance
             syncer_instance.start()
 
