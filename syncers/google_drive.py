@@ -46,7 +46,7 @@ class GoogleDrive(SyncBase):
         log.info('uploading to GoogleDrive: %s -> %s' %
                  (event.source_absolute, event.target_absolute))
 
-        self.send_progress(self, event.source_absolute, 0.0)
+        self.send_progress(event.source_absolute, 0.0)
         # TODO handle dir/file removal
         try:
             if event.isdir:
@@ -57,7 +57,7 @@ class GoogleDrive(SyncBase):
             # file was deleted immediatily?
             log.warning('upload failed' + str(e))
         finally:
-            self.send_progress(self, event.source_absolute, 1.0)
+            self.send_progress(event.source_absolute, 1.0)
 
     def walk(self, start='/'):
         return (x['path'] + x['title'] for x in self._walk(start=start))

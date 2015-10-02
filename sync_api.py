@@ -9,6 +9,7 @@ Should support: google drive, dropbox, rsync
    http://sphinxcontrib-napoleon.readthedocs.org/en/latest/example_google.html
 """
 from builtins import super
+import builtins
 
 from threading import Thread
 from importlib import import_module
@@ -16,6 +17,7 @@ import pkgutil
 import pyclbr
 
 import syncers
+from utils.packages import find_modules_with_super_class
 from utils.containers import OrderedSetQueue
 from utils.log import log
 from utils.strings import underscore
@@ -46,20 +48,25 @@ class QueueConsumer(Thread):
 
 
 class SyncBase(QueueConsumer):
-    def __init__(self, progress_callback=None):
-        """
-        Args:
-            progress_callback (callable):
-                Is called regularly with the progress of the syncing process.
-                Range: 0.0 - 1.0
-        """
+    def __init__(self):
         super().__init__()
         self.name = self.__class__.__name__
         self.progress = 1.0
-        def send_progress(syncer, event, progress):
-            self.progress = progress
-            progress_callback(syncer, event, progress)
-        self.send_progress = send_progress
+        self.progress_callbacks = []
+
+    def register_progress_callback(self, callback):
+        """
+        Args:
+            callback (callable):
+                Is called regularly with the progress of the syncing process.
+                Range: 0.0 - 1.0
+        """
+        self.progress_callbacks.append(callback)
+
+    def send_progress(self, event, progress):
+        self.progress = progress
+        for callback in self.progress_callbacks:
+            callback(self, event, progress)
 
 
     @staticmethod
@@ -118,45 +125,34 @@ class SyncManager(QueueConsumer):
         """
         super().__init__(queue=file_queue)
         self.progress_callback = progress_callback
-        self.start_syncers()
+
+        def syncer_is_enabled(syncer):
+            for watch in config.data['watches']:
+                if not watch.get('disabled', False) and \
+                        syncer in watch['syncers']:
+                    return True
+            return False
+        self.syncers = self.get_syncer_instances(filter=syncer_is_enabled)
+
+        for syncer in self.syncers.values():
+            syncer.start()
+            syncer.register_progress_callback(self.handle_sync_progress)
         self.start()
 
-    def _find_modules_with_super_class(self, pkg, super_class):
-        found_classes = {}
-        for importer, modname, ispkg in pkgutil.iter_modules(pkg.__path__):
-            if ispkg:
-                log.info(
-                    'Found package in syncers plugin directory, skipping!')
-                continue
-            import_path = "%s.%s" % (pkg.__name__, modname)
-            module = pyclbr.readmodule(import_path)
-            for item, val in module.items():
-                if super_class.__name__ in val.super:
-                    found_classes[item] = import_path
-        return found_classes
-
-    def start_syncers(self):
+    @staticmethod
+    def get_syncer_instances(filter=lambda: True):
         # Import syncers from 'syncers' package and start them.
         # Does something like: from syncers.dropbox import Dropbox
-        self.syncers = {}
-        syncers_lists = [x['syncers'] for x in filter(
-            lambda x: not x.get('disabled'), config.data['watches']
-        )]
-        # flatten list of lists and make vals unique via set comprehension
-        # (start only one instance for every syncer)
-        enabled_syncers = {val for sublist in syncers_lists for val in sublist}
-
+        syncer_instances = {}
         # find classes inside syncers package that have the superclass SyncBase
-        available_syncers = self._find_modules_with_super_class(
-                syncers, SyncBase)
-        log.debug('available_syncers: %s' % available_syncers)
+        available_syncers = dict(find_modules_with_super_class(
+                syncers, SyncBase))
+        log.debug('available_syncers: %s' % list(available_syncers.keys()))
 
-        for syncer in enabled_syncers:
-            syncer_instance = getattr(
-                import_module(available_syncers[syncer]), syncer
-            )(progress_callback=self.handle_sync_progress)
-            self.syncers[syncer] = syncer_instance
-            syncer_instance.start()
+        for syncer in builtins.filter(filter, available_syncers.keys()):
+            syncer_instances[syncer] = getattr(
+                import_module(available_syncers[syncer]), syncer)()
+        return syncer_instances
 
     def handle_sync_progress(self, syncer, file, progress):
         log.info("%s: %s %s" % (syncer.name, progress, file))

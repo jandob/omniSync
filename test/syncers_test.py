@@ -16,13 +16,9 @@ sys.path.append(os.path.abspath(sys.path[0] + os.sep + '..'))
 from utils.strings import camelize
 from utils.files import write_random_file
 import config
-import syncers
+from sync_api import SyncManager
 from file_watcher import InotifyEvent
 
-
-syncer_modules = []
-for importer, modname, is_package in pkgutil.iter_modules(syncers.__path__):
-    syncer_modules.append(modname)
 
 REMOTE_ROOT = '/omniSyncTest'
 
@@ -64,15 +60,11 @@ def local_temp_filesystem(request):
         make_test_file(path, size)
     return {'files': [file for file, size in test_files], 'root': temp_root}
 
-@pytest.fixture(scope='class', params=['google_drive', 'dropbox'])
-#@pytest.fixture(scope='class', params=['dropbox'])
+@pytest.fixture(scope='class', params=['GoogleDrive', 'Dropbox'])
+#@pytest.fixture(scope='class', params=['Dropbox'])
 def syncer(request):
-    def handle_sync_progress(*args, **kwargs):
-        pass
-    syncer_name = request.param
-    syncer = getattr(
-        import_module('syncers.' + syncer_name), camelize(syncer_name)
-    )(progress_callback=handle_sync_progress)
+    syncer = SyncManager.get_syncer_instances(
+            filter=lambda syncer: syncer == request.param)[request.param]
     syncer.init()
     syncer.rm(REMOTE_ROOT, trash=False)
 

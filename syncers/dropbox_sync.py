@@ -28,13 +28,13 @@ class Dropbox(SyncBase):
         log.info('uploading to Dropbox: %s -> %s' %
                  (event.source_absolute, event.target_absolute))
 
-        self.send_progress(self, event.source_absolute, 0.0)
+        self.send_progress(event.source_absolute, 0.0)
         try:
             self._upload(event, event.target_absolute)
         except IOError as e:
             # file was deleted immediatily
             log.warning('upload failed' + str(e))
-            self.send_progress(self, event.source_absolute, 1.0)
+            self.send_progress(event.source_absolute, 1.0)
 
     def walk(self, start='/'):
         response = self.client.delta(cursor=None, path_prefix=start)
@@ -110,7 +110,7 @@ class Dropbox(SyncBase):
         size = os.stat(file.fileno()).st_size
         if size < 1000: # kb
             self.client.put_file(dropbox_path, file, overwrite=True)
-            self.send_progress(self, local_path, 1.0)
+            self.send_progress(local_path, 1.0)
         else:
             chunk_size = 1024 * 1024
             offset = 0
@@ -124,8 +124,7 @@ class Dropbox(SyncBase):
                     (offset, upload_id) = self.client.upload_chunk(
                         last_block, next_chunk_size, offset, upload_id)
                     self.last_block = None
-                    self.send_progress(
-                        self, local_path, min(offset, size) / size)
+                    self.send_progress(local_path, min(offset, size) / size)
                 except dropbox.rest.ErrorResponse as e:
                     log.exception(e)
             self.client.commit_chunked_upload(
